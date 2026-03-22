@@ -108,6 +108,59 @@ class CreateDefaultSkillRequest(BaseModel):
     scripts: dict | None = Field(None, description="Script files")
 
 
+def _read_skill_description(skill_md: Path) -> str:
+    """Read description from SKILL.md file."""
+    try:
+        content = skill_md.read_text(encoding="utf-8")
+        if content.startswith("---"):
+            parts = content.split("---", 2)
+            if len(parts) >= 3:
+                import yaml
+
+                frontmatter = yaml.safe_load(parts[1])
+                return frontmatter.get("description", "")
+    except Exception as e:
+        logger.warning(f"Failed to read SKILL.md: {e}")
+    return ""
+
+
+def _collect_skills_from_dir(
+    skills_dir: Path,
+    active_skills_dir: Path,
+    source: str,
+    is_active: bool,
+) -> list[DefaultSkillSpec]:
+    """Collect skills from a directory."""
+    skills: list[DefaultSkillSpec] = []
+    if not skills_dir.exists():
+        return skills
+
+    for skill_dir in skills_dir.iterdir():
+        if not skill_dir.is_dir() or not (skill_dir / "SKILL.md").exists():
+            continue
+
+        skill_name = skill_dir.name
+        description = _read_skill_description(skill_dir / "SKILL.md")
+
+        agent_skill_dir = active_skills_dir / skill_name
+        exists_in_agent = (
+            agent_skill_dir.exists()
+            and (agent_skill_dir / "SKILL.md").exists()
+        )
+
+        skills.append(
+            DefaultSkillSpec(
+                name=skill_name,
+                description=description,
+                source=source,
+                is_active=is_active,
+                is_enabled_in_agent=exists_in_agent,
+                exists_in_agent=exists_in_agent,
+            ),
+        )
+    return skills
+
+
 @router.get("", response_model=DefaultSkillsListResponse)
 async def list_default_skills(request: Request):
     """List all default skills (builtin + inactive) with their status."""
@@ -127,107 +180,22 @@ async def list_default_skills(request: Request):
 
     # Collect all skills from both directories
     all_skills: list[DefaultSkillSpec] = []
-
-    # Get skills from builtin directory
-    if builtin_dir.exists():
-        logger.info(f"Checking builtin skills dir: {builtin_dir}")
-        for skill_dir in builtin_dir.iterdir():
-            logger.info(
-                f"Checking skill dir: {skill_dir}, is_dir: {skill_dir.is_dir()}",
-            )
-            if skill_dir.is_dir() and (skill_dir / "SKILL.md").exists():
-                skill_name = skill_dir.name
-                # Read description from SKILL.md
-                skill_md = skill_dir / "SKILL.md"
-                description = ""
-                try:
-                    content = skill_md.read_text(encoding="utf-8")
-                    logger.info(
-                        f"Read SKILL.md for {skill_name}, content starts with: {content[:50]}",
-                    )
-                    # Extract description from frontmatter
-                    if content.startswith("---"):
-                        parts = content.split("---", 2)
-                        logger.info(f"Split parts count: {len(parts)}")
-                        if len(parts) >= 3:
-                            import yaml
-
-                            frontmatter = yaml.safe_load(parts[1])
-                            logger.info(f"Frontmatter: {frontmatter}")
-                            description = frontmatter.get("description", "")
-                            logger.info(f"Description: {description}")
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to read SKILL.md for {skill_name}: {e}",
-                    )
-
-                # Check if exists in current agent
-                agent_skill_dir = active_skills_dir / skill_name
-                exists_in_agent = (
-                    agent_skill_dir.exists()
-                    and (agent_skill_dir / "SKILL.md").exists()
-                )
-
-                # Check if enabled in current agent
-                enabled = False
-                if exists_in_agent:
-                    # Check if in active_skills (enabled means it's copied to agent)
-                    enabled = True
-
-                all_skills.append(
-                    DefaultSkillSpec(
-                        name=skill_name,
-                        description=description,
-                        source="builtin",
-                        is_active=True,
-                        is_enabled_in_agent=enabled,
-                        exists_in_agent=exists_in_agent,
-                    ),
-                )
-
-    # Get skills from inactive directory
-    if inactive_dir.exists():
-        for skill_dir in inactive_dir.iterdir():
-            if skill_dir.is_dir() and (skill_dir / "SKILL.md").exists():
-                skill_name = skill_dir.name
-                # Read description from SKILL.md
-                skill_md = skill_dir / "SKILL.md"
-                description = ""
-                try:
-                    content = skill_md.read_text(encoding="utf-8")
-                    if content.startswith("---"):
-                        parts = content.split("---", 2)
-                        if len(parts) >= 3:
-                            import yaml
-
-                            frontmatter = yaml.safe_load(parts[1])
-                            description = frontmatter.get("description", "")
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to read SKILL.md for {skill_name}: {e}",
-                    )
-
-                # Check if exists in current agent
-                agent_skill_dir = active_skills_dir / skill_name
-                exists_in_agent = (
-                    agent_skill_dir.exists()
-                    and (agent_skill_dir / "SKILL.md").exists()
-                )
-
-                enabled = False
-                if exists_in_agent:
-                    enabled = True
-
-                all_skills.append(
-                    DefaultSkillSpec(
-                        name=skill_name,
-                        description=description,
-                        source="inactive",
-                        is_active=False,
-                        is_enabled_in_agent=enabled,
-                        exists_in_agent=exists_in_agent,
-                    ),
-                )
+    all_skills.extend(
+        _collect_skills_from_dir(
+            builtin_dir,
+            active_skills_dir,
+            "builtin",
+            True,
+        ),
+    )
+    all_skills.extend(
+        _collect_skills_from_dir(
+            inactive_dir,
+            active_skills_dir,
+            "inactive",
+            False,
+        ),
+    )
 
     logger.info(f"Total skills found: {len(all_skills)}")
     return DefaultSkillsListResponse(
@@ -241,7 +209,7 @@ async def enable_skill_in_agent(
     request: Request,
     body: EnableSkillRequest,
 ):
-    """Enable a skill in the current agent by copying it to agent's active_skills."""
+    """Enable a skill in the current agent by copying to active_skills."""
     from ..agent_context import get_agent_for_request
 
     workspace = await get_agent_for_request(request)
@@ -293,7 +261,7 @@ async def disable_skill_in_agent(
     request: Request,
     body: EnableSkillRequest,
 ):
-    """Disable a skill in the current agent by removing it from agent's active_skills."""
+    """Disable a skill in the current agent by removing from active_skills."""
     from ..agent_context import get_agent_for_request
 
     workspace = await get_agent_for_request(request)
@@ -394,7 +362,10 @@ async def create_default_skill(
     ):
         raise HTTPException(
             status_code=400,
-            detail="Invalid skill name. Only letters, numbers, underscores, and hyphens allowed.",
+            detail=(
+                "Invalid skill name. "
+                "Only letters, numbers, underscores, and hyphens allowed."
+            ),
         )
 
     skill_dir = builtin_dir / skill_name
@@ -494,7 +465,10 @@ async def upload_default_skill_zip(
     if len(data) > max_size:
         raise HTTPException(
             status_code=400,
-            detail=f"File too large ({len(data) // (1024 * 1024)} MB). Maximum is 100 MB.",
+            detail=(
+                f"File too large ({len(data) // (1024 * 1024)} MB). "
+                "Maximum is 100 MB."
+            ),
         )
 
     if not zipfile.is_zipfile(io.BytesIO(data)):
@@ -556,7 +530,7 @@ async def upload_default_skill_zip(
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
-# ─── Hub Import APIs (for importing skills from URL) ───────────────────────────
+# ─── Hub Import APIs (for importing skills from URL) ────────
 
 # In-memory task storage (same as skills.py)
 _hub_install_tasks: dict[str, dict] = {}
