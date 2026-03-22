@@ -298,6 +298,11 @@ export default function Sidebar({ selectedKey }: SidebarProps) {
           label: t("nav.voiceTranscription"),
           icon: <Mic size={16} />,
         },
+        {
+          key: "default-skills",
+          label: t("nav.defaultSkills"),
+          icon: <Sparkles size={16} />,
+        },
       ],
     },
   ];

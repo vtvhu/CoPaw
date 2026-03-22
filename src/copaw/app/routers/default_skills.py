@@ -57,7 +57,6 @@ def get_inactive_skills_dir() -> Path:
     """Get the path to inactive skills directory."""
     return (
         Path(__file__).parent.parent.parent
-        / "copaw"
         / "agents"
         / "InactiveSkill"
     )
