@@ -55,11 +55,7 @@ def get_builtin_skills_dir() -> Path:
 
 def get_inactive_skills_dir() -> Path:
     """Get the path to inactive skills directory."""
-    return (
-        Path(__file__).parent.parent.parent
-        / "agents"
-        / "InactiveSkill"
-    )
+    return Path(__file__).parent.parent.parent / "agents" / "InactiveSkill"
 
 
 def get_active_skills_dir(workspace_dir: Path) -> Path:
