@@ -78,10 +78,7 @@ export default function MainLayout() {
                 path="/voice-transcription"
                 element={<VoiceTranscriptionPage />}
               />
-              <Route
-                path="/default-skills"
-                element={<DefaultSkillsPage />}
-              />
+              <Route path="/default-skills" element={<DefaultSkillsPage />} />
             </Routes>
           </div>
         </Content>
